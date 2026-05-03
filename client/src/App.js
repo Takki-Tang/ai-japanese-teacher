@@ -1,6 +1,8 @@
 import { useState, useRef } from "react";
 import "./App.css";
 
+const API_BASE = "https://ai-japanese-teacher-production.up.railway.app";
+
 function App() {
   const [mode, setMode] = useState("lesson");
   const [grammar, setGrammar] = useState("〜わけではない");
@@ -69,12 +71,14 @@ function App() {
   };
 
   const createAudioForSegment = async (segment) => {
-    const text = `${segment.heading}。${segment.text}`;
+    const text = segment.text || "";
 
-    const res = await fetch("https://ai-japanese-teacher-production.up.railway.app/api/tts", {
+    const res = await fetch(`${API_BASE}/api/tts`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ text })
     });
 
     const data = await res.json();
@@ -122,7 +126,7 @@ function App() {
           );
           audioListRef.current = audioList;
         } catch (error) {
-          console.error("AI voice failed, fallback to browser voice:", error);
+          console.error("AI voice failed, fallback:", error);
           useAiVoice = false;
           audioListRef.current = [];
         }
@@ -140,7 +144,7 @@ function App() {
         setShownSubtitleCount(i + 1);
 
         const segment = list[i];
-        const text = `${segment.heading}。${segment.text}`;
+        const text = segment.text || "";
 
         if (useAiVoice && audioList[i]) {
           const audio = audioList[i];
@@ -172,9 +176,11 @@ function App() {
     setStatusText(customMode === "chat" ? "老师正在想怎么跟你聊……" : "老师思考中……");
 
     try {
-      const res = await fetch("https://ai-japanese-teacher-production.up.railway.app/api/classroom", {
+      const res = await fetch(`${API_BASE}/api/classroom`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify({
           grammarPoint: grammar,
           level: "N3",
@@ -188,7 +194,7 @@ function App() {
 
       const newSegments = Array.isArray(data.segments)
         ? data.segments
-        : [{ heading: "老师讲解", text: data.subtitle || "" }];
+        : [{ heading: "老师", text: data.subtitle || "我们重新来讲一次。" }];
 
       setTitle(data.title || "");
       setBlackboard(data.blackboard || []);
@@ -315,7 +321,7 @@ function App() {
         setRecording(false);
 
         const audioBlob = new Blob(chunksRef.current, {
-          type: "audio/webm",
+          type: "audio/webm"
         });
 
         stream.getTracks().forEach((track) => track.stop());
@@ -327,9 +333,9 @@ function App() {
         setStatusText("正在让 AI 听你的语音……");
 
         try {
-          const res = await fetch("https://ai-japanese-teacher-production.up.railway.app/api/audio", {
+          const res = await fetch(`${API_BASE}/api/audio`, {
             method: "POST",
-            body: formData,
+            body: formData
           });
 
           const data = await res.json();
@@ -339,7 +345,10 @@ function App() {
 
           if (!text.trim()) {
             setSegments([
-              { heading: "语音识别", text: "没有识别到内容，请再说一次。" },
+              {
+                heading: "语音识别",
+                text: "没有识别到内容，请再说一次。",
+              },
             ]);
             setLoading(false);
             setStatusText("");
@@ -352,7 +361,10 @@ function App() {
         } catch (error) {
           console.error(error);
           setSegments([
-            { heading: "错误", text: "语音上传或 AI 识别失败。" },
+            {
+              heading: "错误",
+              text: "语音上传或 AI 识别失败。",
+            },
           ]);
           setLoading(false);
           setStatusText("");
@@ -362,7 +374,10 @@ function App() {
       mediaRecorder.start();
       setRecording(true);
       setSegments([
-        { heading: "录音中", text: "请开始说话。说完后点击「停止录音」。" },
+        {
+          heading: "录音中",
+          text: "请开始说话。说完后点击「停止录音」。",
+        },
       ]);
       setCurrentSegmentIndex(0);
       setShownSubtitleCount(1);
@@ -455,7 +470,9 @@ function App() {
           </div>
 
           {recognizedText && (
-            <div className="recognized">识别内容：{recognizedText}</div>
+            <div className="recognized">
+              识别内容：{recognizedText}
+            </div>
           )}
         </section>
       </main>
