@@ -16,9 +16,9 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-const TEXT_MODEL = "gemini-3.1-flash-lite-preview";
-const AUDIO_MODEL = "gemini-3.1-flash-lite-preview";
-const TTS_MODEL = "gemini-3.1-flash-tts-preview";
+const TEXT_MODEL = "gemini-2.5-flash-lite";
+const AUDIO_MODEL = "gemini-2.5-flash";
+const TTS_MODEL = "gemini-2.5-flash-preview-tts";
 
 function pcmToWavBase64(pcmBase64, sampleRate = 24000, channels = 1, bitDepth = 16) {
   const pcmBuffer = Buffer.from(pcmBase64, "base64");
@@ -50,12 +50,12 @@ function buildPrompt({ grammarPoint, level, history, studentInput, mode }) {
 你是一个面向中文母语者的日语老师。现在是课间聊天时间。
 
 规则：
-- 中文为主，自然聊天。
+- 必须中文为主。
 - 可以聊日本文化、日本人思维、旅游、职场、生活习惯。
 - 不要出题。
 - 不要强行回到语法。
 - 可以顺带讲一点日语小知识。
-- 每个 segment 的 text 不能为空。
+- 每个 segments 的 text 必须有内容，不能为空。
 
 返回严格 JSON：
 
@@ -69,7 +69,7 @@ function buildPrompt({ grammarPoint, level, history, studentInput, mode }) {
   "segments": [
     {
       "heading": "老师",
-      "text": "这里必须写完整回答，不要空。"
+      "text": "这里写完整回答。"
     }
   ],
   "nextAction": "chat"
@@ -94,8 +94,8 @@ ${studentInput || "我们聊聊日本文化吧"}
 - 必须用中文讲解。
 - 日语只用于语法点、例句、学生答案修正。
 - 绝对不要整段日语授课。
-- 每个 segment 的 text 必须有完整正文，不能为空。
-- 不要只返回“老师讲解”这种标题。
+- 不要只返回标题。
+- 每个 segments 的 text 必须有完整正文，不能为空。
 - 要像真人老师，有核心感觉，有例句，有层次。
 
 如果学生刚开始：
@@ -160,9 +160,6 @@ app.post("/api/classroom", async (req, res) => {
         temperature: 0.7,
         maxOutputTokens: 1400,
         responseMimeType: "application/json",
-        thinkingConfig: {
-          thinkingLevel: "minimal",
-        },
       },
     });
 
@@ -188,7 +185,7 @@ app.post("/api/classroom", async (req, res) => {
       data.segments = [
         {
           heading: "老师",
-          text: "我们重新来。这个语法可以先从核心感觉理解，不要死背中文翻译。",
+          text: "我们重新来。这个语法先从核心感觉理解，不要死背中文翻译。",
         },
       ];
     }
@@ -198,7 +195,7 @@ app.post("/api/classroom", async (req, res) => {
       text:
         s.text && s.text.trim()
           ? s.text
-          : "这里老师刚刚没有说完整，我们换一种方式重新讲。",
+          : "老师刚刚没有说完整，我们换一种方式重新讲。",
     }));
 
     if (!Array.isArray(data.blackboard) || data.blackboard.length === 0) {
@@ -208,7 +205,10 @@ app.post("/api/classroom", async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error("classroom error:", error);
-    res.status(500).json({ error: "AI classroom request failed" });
+    res.status(500).json({
+      error: "AI classroom request failed",
+      detail: String(error),
+    });
   }
 });
 
@@ -241,16 +241,16 @@ app.post("/api/audio", upload.single("audio"), async (req, res) => {
       config: {
         temperature: 0,
         maxOutputTokens: 200,
-        thinkingConfig: {
-          thinkingLevel: "minimal",
-        },
       },
     });
 
     res.json({ text: response.text || "" });
   } catch (error) {
     console.error("audio error:", error);
-    res.status(500).json({ error: "audio request failed" });
+    res.status(500).json({
+      error: "audio request failed",
+      detail: String(error),
+    });
   }
 });
 
@@ -298,7 +298,10 @@ app.post("/api/tts", async (req, res) => {
     });
   } catch (error) {
     console.error("tts error:", error);
-    res.status(500).json({ error: "tts request failed" });
+    res.status(500).json({
+      error: "tts request failed",
+      detail: String(error),
+    });
   }
 });
 
