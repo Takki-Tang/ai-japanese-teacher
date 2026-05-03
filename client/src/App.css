@@ -1,0 +1,231 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Microsoft YaHei", "Yu Gothic", "Meiryo", sans-serif;
+  background: #f3f4f6;
+}
+
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  height: 90px;
+  padding: 12px 24px;
+  background: white;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 30px;
+}
+
+.grammar-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.grammar-box input {
+  width: 320px;
+  padding: 13px;
+  font-size: 19px;
+}
+
+button {
+  padding: 12px 20px;
+  font-size: 17px;
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  background: #2563eb;
+  color: white;
+}
+
+button:disabled {
+  background: #aaa;
+  cursor: not-allowed;
+}
+
+.classroom {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 55% 45%;
+  gap: 20px;
+  padding: 18px 22px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.blackboard {
+  background: #123f2b;
+  color: white;
+  border-radius: 22px;
+  padding: 26px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.board-title {
+  font-size: 28px;
+  font-weight: bold;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.28);
+  flex-shrink: 0;
+}
+
+.board-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding-right: 8px;
+  min-height: 0;
+}
+
+.board-card {
+  background: rgba(255, 255, 255, 0.11);
+  border-left: 5px solid rgba(255, 255, 255, 0.75);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 22px;
+  line-height: 1.55;
+  flex-shrink: 0;
+}
+
+.empty {
+  color: #cbd5e1;
+  font-size: 22px;
+}
+
+.teacher {
+  background: white;
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.teacher-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.teacher-label {
+  font-size: 15px;
+  color: #64748b;
+  margin-bottom: 3px;
+}
+
+.lesson-title {
+  font-size: 21px;
+  font-weight: bold;
+  color: #111827;
+}
+
+.status-pill {
+  font-size: 14px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  white-space: nowrap;
+}
+
+.subtitle-window {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  background: #f8fafc;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.subtitle-line {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 12px 14px;
+  opacity: 0.5;
+  transform: scale(0.985);
+}
+
+.subtitle-line.active {
+  opacity: 1;
+  transform: scale(1);
+  border: 2px solid #2563eb;
+  background: #eff6ff;
+}
+
+.subtitle-heading {
+  font-size: 16px;
+  font-weight: bold;
+  color: #1d4ed8;
+  margin-bottom: 6px;
+}
+
+.subtitle-text {
+  font-size: 18px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  color: #111827;
+}
+
+.recognized {
+  margin-top: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  background: #f1f5f9;
+  border-left: 5px solid #2563eb;
+  border-radius: 10px;
+  color: #334155;
+  flex-shrink: 0;
+}
+
+.input-area {
+  height: 86px;
+  padding: 13px 22px;
+  background: white;
+  border-top: 1px solid #ddd;
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 14px;
+  font-size: 19px;
+  border-radius: 10px;
+  border: 1px solid #ccc;
+}
+
+.stop-button {
+  background: #666;
+}
