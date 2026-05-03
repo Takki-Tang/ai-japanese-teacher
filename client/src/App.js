@@ -71,7 +71,7 @@ function App() {
   const createAudioForSegment = async (segment) => {
     const text = `${segment.heading}。${segment.text}`;
 
-    const res = await fetch("http://localhost:3001/api/tts", {
+    const res = await fetch("https://ai-japanese-teacher-production.up.railway.app/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -172,7 +172,7 @@ function App() {
     setStatusText(customMode === "chat" ? "老师正在想怎么跟你聊……" : "老师思考中……");
 
     try {
-      const res = await fetch("http://localhost:3001/api/classroom", {
+      const res = await fetch("https://ai-japanese-teacher-production.up.railway.app/api/classroom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -327,7 +327,7 @@ function App() {
         setStatusText("正在让 AI 听你的语音……");
 
         try {
-          const res = await fetch("http://localhost:3001/api/audio", {
+          const res = await fetch("https://ai-japanese-teacher-production.up.railway.app/api/audio", {
             method: "POST",
             body: formData,
           });
