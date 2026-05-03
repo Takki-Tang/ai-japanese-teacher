@@ -1,0 +1,9 @@
+{
+  "name": "ai-japanese-teacher-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd server && npm install",
+    "start": "cd server && npm install && npm start"
+  }
+}
