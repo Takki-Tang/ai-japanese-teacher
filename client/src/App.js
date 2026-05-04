@@ -39,7 +39,6 @@ function App() {
       audioRef.current = null;
     }
 
-    window.speechSynthesis.cancel();
     setSpeaking(false);
   };
 
@@ -49,42 +48,19 @@ function App() {
     setStatusText("讲解已暂停。");
   };
 
-  const speakWithBrowserFallback = (text, sessionId) => {
-    return new Promise((resolve) => {
-      if (sessionId !== playSessionRef.current) {
-        resolve();
-        return;
-      }
-
-      window.speechSynthesis.cancel();
-
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = "zh-CN";
-      utter.rate = 1.08;
-      utter.pitch = 1;
-
-      utter.onend = resolve;
-      utter.onerror = resolve;
-
-      window.speechSynthesis.speak(utter);
-    });
-  };
-
   const createAudioForSegment = async (segment) => {
-    const text = segment.text || "";
-
     const res = await fetch(`${API_BASE}/api/tts`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ text })
+      body: JSON.stringify({ text: segment.text })
     });
 
     const data = await res.json();
 
-    if (!data.audio) {
-      throw new Error("no audio");
+    if (!res.ok || !data.audio) {
+      throw new Error(data.detail || "AI语音生成失败");
     }
 
     return new Audio(`data:audio/wav;base64,${data.audio}`);
@@ -98,7 +74,7 @@ function App() {
       }
 
       audioRef.current = audio;
-      audio.playbackRate = 1.15;
+      audio.playbackRate = 1.08;
       audio.onended = resolve;
       audio.onerror = reject;
       audio.play().catch(reject);
@@ -114,24 +90,18 @@ function App() {
     setPaused(false);
 
     let audioList = audioListRef.current;
-    let useAiVoice = true;
 
     try {
       if (!reuseAudio || audioList.length !== list.length) {
-        setStatusText("老师正在准备语音……");
+        setStatusText("老师正在生成语音……");
 
-        try {
-          audioList = await Promise.all(
-            list.map((segment) => createAudioForSegment(segment))
-          );
-          audioListRef.current = audioList;
-        } catch (error) {
-          console.error("AI voice failed, fallback:", error);
-          useAiVoice = false;
-          audioListRef.current = [];
-        }
+        audioList = await Promise.all(
+          list.map((segment) => createAudioForSegment(segment))
+        );
 
         if (sessionId !== playSessionRef.current) return;
+
+        audioListRef.current = audioList;
       }
 
       setStatusText("");
@@ -143,17 +113,14 @@ function App() {
         setCurrentSegmentIndex(i);
         setShownSubtitleCount(i + 1);
 
-        const segment = list[i];
-        const text = segment.text || "";
+        const audio = audioList[i];
+        audio.currentTime = 0;
 
-        if (useAiVoice && audioList[i]) {
-          const audio = audioList[i];
-          audio.currentTime = 0;
-          await playAudio(audio, sessionId);
-        } else {
-          await speakWithBrowserFallback(text, sessionId);
-        }
+        await playAudio(audio, sessionId);
       }
+    } catch (error) {
+      console.error("AI voice error:", error);
+      setStatusText("AI语音生成失败，请稍后再试。");
     } finally {
       if (sessionId === playSessionRef.current) {
         setSpeaking(false);
@@ -192,6 +159,10 @@ function App() {
 
       const data = await res.json();
 
+      if (!res.ok) {
+        throw new Error(data.detail || "AI请求失败");
+      }
+
       const newSegments = Array.isArray(data.segments)
         ? data.segments
         : [{ heading: "老师", text: data.subtitle || "我们重新来讲一次。" }];
@@ -223,7 +194,7 @@ function App() {
       setSegments([
         {
           heading: "错误",
-          text: "AI请求失败。请确认后端 server 是否正在运行。",
+          text: error.message || "AI请求失败。请确认后端 server 是否正在运行。",
         },
       ]);
       setLoading(false);
@@ -272,7 +243,7 @@ function App() {
     if (nextMode === "chat") {
       setBlackboard([
         "☕ 课间聊聊：日本文化 / 旅游 / 思维方式",
-        "💡 可以问：日本人为什么这样说？",
+        "💡 可以问：日本人为什么这样说",
         "🗣️ 也可以聊：日常表达、职场、旅行",
       ]);
       setTitle("课间聊聊");
@@ -289,7 +260,7 @@ function App() {
       setSegments([
         {
           heading: "回到课堂",
-          text: "好，我们回到刚才的语法课。你可以点击「下一步」继续，或者直接问我刚才没听懂的地方。",
+          text: "好，我们回到刚才的语法课。你可以点击下一步继续，也可以直接问我刚才没听懂的地方。",
         },
       ]);
       setCurrentSegmentIndex(0);
@@ -298,98 +269,7 @@ function App() {
   };
 
   const startRecording = async () => {
-    if (loading || recording || speaking) return;
-
-    try {
-      hardStopAllAudio();
-      audioListRef.current = [];
-      setPaused(false);
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        setRecording(false);
-
-        const audioBlob = new Blob(chunksRef.current, {
-          type: "audio/webm"
-        });
-
-        stream.getTracks().forEach((track) => track.stop());
-
-        const formData = new FormData();
-        formData.append("audio", audioBlob, "voice.webm");
-
-        setLoading(true);
-        setStatusText("正在让 AI 听你的语音……");
-
-        try {
-          const res = await fetch(`${API_BASE}/api/audio`, {
-            method: "POST",
-            body: formData
-          });
-
-          const data = await res.json();
-          const text = data.text || "";
-
-          setRecognizedText(text);
-
-          if (!text.trim()) {
-            setSegments([
-              {
-                heading: "语音识别",
-                text: "没有识别到内容，请再说一次。",
-              },
-            ]);
-            setLoading(false);
-            setStatusText("");
-            return;
-          }
-
-          setLoading(false);
-          setStatusText("");
-          await callTeacher(text, history, mode);
-        } catch (error) {
-          console.error(error);
-          setSegments([
-            {
-              heading: "错误",
-              text: "语音上传或 AI 识别失败。",
-            },
-          ]);
-          setLoading(false);
-          setStatusText("");
-        }
-      };
-
-      mediaRecorder.start();
-      setRecording(true);
-      setSegments([
-        {
-          heading: "录音中",
-          text: "请开始说话。说完后点击「停止录音」。",
-        },
-      ]);
-      setCurrentSegmentIndex(0);
-      setShownSubtitleCount(1);
-    } catch (error) {
-      console.error(error);
-      setSegments([
-        {
-          heading: "麦克风错误",
-          text: "无法使用麦克风。请确认浏览器已经允许麦克风权限。",
-        },
-      ]);
-    }
+    setStatusText("语音输入暂时关闭，先用打字回答。");
   };
 
   const stopRecording = () => {
@@ -401,7 +281,7 @@ function App() {
   };
 
   const visibleSubtitles = segments.slice(
-    Math.max(0, shownSubtitleCount - 4),
+    Math.max(0, shownSubtitleCount - 5),
     shownSubtitleCount
   );
 
@@ -454,7 +334,7 @@ function App() {
 
           <div className="subtitle-window">
             {visibleSubtitles.map((segment, index) => {
-              const realIndex = Math.max(0, shownSubtitleCount - 4) + index;
+              const realIndex = Math.max(0, shownSubtitleCount - 5) + index;
               const active = realIndex === currentSegmentIndex;
 
               return (
@@ -484,7 +364,7 @@ function App() {
           placeholder={
             mode === "chat"
               ? "问点日本文化、旅游、职场、生活习惯..."
-              : "打字用（可选）"
+              : "打字回答或造句"
           }
           onKeyDown={(e) => {
             if (e.key === "Enter") {
