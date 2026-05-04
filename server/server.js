@@ -13,7 +13,7 @@ app.use(express.json({ limit: "20mb" }));
 
 const PORT = process.env.PORT || 8080;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const TEXT_MODEL = "gemini-2.0-flash";
+const TEXT_MODEL = "gemini-2.5-flash";
 
 async function callGeminiText(prompt) {
   if (!GEMINI_API_KEY) {
