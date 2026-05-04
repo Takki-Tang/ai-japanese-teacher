@@ -1,5 +1,5 @@
-const express = require("express");
-const cors = require("cors");
+import express from "express";
+import cors from "cors";
 
 const app = express();
 app.use(cors());
@@ -8,7 +8,7 @@ app.use(express.json({ limit: "2mb" }));
 const PORT = process.env.PORT || 3001;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-const VERSION = "minimal-ai-shell-2026-05-04-01";
+const VERSION = "minimal-ai-shell-2026-05-04-02";
 
 function mustHaveKey() {
   if (!GEMINI_API_KEY) {
@@ -102,47 +102,28 @@ app.post("/api/lesson", async (req, res) => {
     const systemPrompt = `
 你是一个非常自然、聪明、会讲中文的 AI 日语老师。
 
-这个系统只是壳子，所有教学逻辑由你决定。
 当前语法点是：「${safeGrammar}」。
 
-绝对规则：
-1. 用户输入什么语法，你就只讲这个语法。
-2. 禁止擅自换成别的语法。
-3. 禁止输出 Markdown。
-4. 禁止输出 JSON 以外的内容。
-5. 黑板只写有用重点，不要写“先理解大方向”“看前面接什么词”这种废话。
-6. 右侧 segments 是老师真正说出口的话，必须自然，像真人老师讲课。
-7. 如果学生造句，你必须批改：
-   - 是否自然
-   - 哪里不自然
-   - 更自然表达
-   - 中文解释
-   - 再给一个类似练习
-8. 如果学生提问，你自然回答问题，然后回到当前语法点。
-9. 课堂要轻松、清楚、自然，不要机械。
+规则：
+1. 只讲这个语法，禁止换语法
+2. 不要废话黑板内容
+3. segments 是老师说的话，要自然
+4. 学生造句必须批改并解释
+5. 输出只能是 JSON
 
-返回 JSON 格式必须是：
+格式：
 {
-  "title": "当前语法标题",
-  "blackboard": [
-    "核心感觉：...",
-    "中文意思：...",
-    "接续：...",
-    "使用场景：...",
-    "例句：..."
-  ],
-  "segments": [
-    {"text": "老师旁白第1句"},
-    {"text": "老师旁白第2句"}
-  ]
+  "title": "...",
+  "blackboard": ["..."],
+  "segments": [{"text":"..."}]
 }
 `;
 
     const userPrompt = {
-      currentGrammarPoint: safeGrammar,
-      currentMode: mode,
+      grammarPoint: safeGrammar,
+      mode,
       studentInput: safeInput,
-      conversationHistory: Array.isArray(history) ? history.slice(-12) : [],
+      history: Array.isArray(history) ? history.slice(-10) : [],
     };
 
     const response = await fetch(
@@ -158,11 +139,7 @@ app.post("/api/lesson", async (req, res) => {
               role: "user",
               parts: [
                 {
-                  text: `${systemPrompt}\n\n输入信息：\n${JSON.stringify(
-                    userPrompt,
-                    null,
-                    2
-                  )}`,
+                  text: `${systemPrompt}\n\n${JSON.stringify(userPrompt)}`,
                 },
               ],
             },
@@ -170,27 +147,6 @@ app.post("/api/lesson", async (req, res) => {
           generationConfig: {
             temperature: 0.8,
             responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: {
-                title: { type: "STRING" },
-                blackboard: {
-                  type: "ARRAY",
-                  items: { type: "STRING" },
-                },
-                segments: {
-                  type: "ARRAY",
-                  items: {
-                    type: "OBJECT",
-                    properties: {
-                      text: { type: "STRING" },
-                    },
-                    required: ["text"],
-                  },
-                },
-              },
-              required: ["title", "blackboard", "segments"],
-            },
           },
         }),
       }
@@ -198,26 +154,17 @@ app.post("/api/lesson", async (req, res) => {
 
     const raw = await response.json();
 
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: "Gemini lesson request failed",
-        detail: raw,
-      });
-    }
+    const text =
+      raw?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 
-    const text = raw?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
     const parsed = JSON.parse(cleanJsonText(text));
     const lesson = normalizeLesson(parsed, safeGrammar);
 
-    res.json({
-      ok: true,
-      lesson,
-      version: VERSION,
-    });
-  } catch (error) {
+    res.json({ ok: true, lesson, version: VERSION });
+  } catch (e) {
     res.status(500).json({
       error: "lesson failed",
-      message: error.message,
+      message: e.message,
     });
   }
 });
@@ -227,13 +174,7 @@ app.post("/api/tts", async (req, res) => {
     mustHaveKey();
 
     const { text = "" } = req.body || {};
-    const safeText = String(text || "").trim();
-
-    if (!safeText) {
-      return res.status(400).json({
-        error: "text is required",
-      });
-    }
+    const safeText = String(text).trim();
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_API_KEY}`,
@@ -246,24 +187,11 @@ app.post("/api/tts", async (req, res) => {
           contents: [
             {
               role: "user",
-              parts: [
-                {
-                  text:
-                    "请用自然、温柔、清楚的日语老师语气朗读下面内容。语速稍慢，但不要机械。\n\n" +
-                    safeText,
-                },
-              ],
+              parts: [{ text: safeText }],
             },
           ],
           generationConfig: {
             responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: "Kore",
-                },
-              },
-            },
           },
         }),
       }
@@ -271,39 +199,29 @@ app.post("/api/tts", async (req, res) => {
 
     const raw = await response.json();
 
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: "Gemini TTS request failed",
-        detail: raw,
-      });
+    const audioPart = raw?.candidates?.[0]?.content?.parts?.find(
+      (p) => p.inlineData
+    );
+
+    if (!audioPart) {
+      return res.status(500).json({ error: "no audio" });
     }
 
-    const inlineData =
-      raw?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)
-        ?.inlineData || null;
-
-    if (!inlineData?.data) {
-      return res.status(502).json({
-        error: "No audio returned from Gemini TTS",
-      });
-    }
-
-    const wavBase64 = pcmToWavBase64(inlineData.data);
+    const wavBase64 = pcmToWavBase64(audioPart.inlineData.data);
 
     res.json({
       ok: true,
       mimeType: "audio/wav",
       audioBase64: wavBase64,
     });
-  } catch (error) {
+  } catch (e) {
     res.status(500).json({
       error: "tts failed",
-      message: error.message,
+      message: e.message,
     });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`AI Japanese Teacher server running on port ${PORT}`);
-  console.log(`version: ${VERSION}`);
+  console.log("Server running:", VERSION);
 });
