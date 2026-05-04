@@ -8,7 +8,7 @@ app.use(express.json({ limit: "2mb" }));
 const PORT = process.env.PORT || 3001;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-const VERSION = "minimal-ai-shell-2026-05-04-02";
+const VERSION = "minimal-ai-shell-2026-05-04-03";
 
 function mustHaveKey() {
   if (!GEMINI_API_KEY) {
@@ -31,7 +31,7 @@ function normalizeLesson(data, grammarPoint) {
     ? data.blackboard
         .map((x) => String(x || "").trim())
         .filter(Boolean)
-        .slice(0, 8)
+        .slice(0, 10)
     : [];
 
   const segments = Array.isArray(data?.segments)
@@ -71,10 +71,6 @@ function pcmToWavBase64(pcmBase64, sampleRate = 24000, channels = 1, bitsPerSamp
   return Buffer.concat([header, pcm]).toString("base64");
 }
 
-app.get("/", (req, res) => {
-  res.json({ ok: true, version: VERSION });
-});
-
 app.get("/version", (req, res) => {
   res.json({ version: VERSION });
 });
@@ -106,10 +102,17 @@ app.post("/api/lesson", async (req, res) => {
 
 规则：
 1. 只讲这个语法，禁止换语法
-2. 不要废话黑板内容
-3. segments 是老师说的话，要自然
-4. 学生造句必须批改并解释
-5. 输出只能是 JSON
+2. 黑板内容必须是有价值的总结，禁止废话
+3. 黑板必须包含：
+   - 核心感觉
+   - 中文意思
+   - 接续
+   - 使用场景
+   - 至少1个例句
+4. 当讲到例句时，必须同步写入 blackboard
+5. segments 是老师真实说的话，要像真人
+6. 学生造句必须批改并解释
+7. 输出只能是 JSON
 
 格式：
 {
@@ -130,9 +133,7 @@ app.post("/api/lesson", async (req, res) => {
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [
             {
@@ -153,9 +154,7 @@ app.post("/api/lesson", async (req, res) => {
     );
 
     const raw = await response.json();
-
-    const text =
-      raw?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const text = raw?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 
     const parsed = JSON.parse(cleanJsonText(text));
     const lesson = normalizeLesson(parsed, safeGrammar);
@@ -180,16 +179,9 @@ app.post("/api/tts", async (req, res) => {
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: safeText }],
-            },
-          ],
+          contents: [{ role: "user", parts: [{ text: safeText }] }],
           generationConfig: {
             responseModalities: ["AUDIO"],
           },
