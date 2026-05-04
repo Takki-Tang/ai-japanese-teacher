@@ -1,331 +1,309 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-
-dotenv.config();
+const express = require("express");
+const cors = require("cors");
 
 const app = express();
-
 app.use(cors());
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "2mb" }));
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3001;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-const TEXT_MODEL = "gemini-2.5-flash";
-const TTS_MODEL = "gemini-2.5-flash-preview-tts";
+const VERSION = "minimal-ai-shell-2026-05-04-01";
 
-function pcmToWavBase64(pcmBase64, sampleRate = 24000, channels = 1, bitDepth = 16) {
-  const pcmBuffer = Buffer.from(pcmBase64, "base64");
-  const byteRate = sampleRate * channels * (bitDepth / 8);
-  const blockAlign = channels * (bitDepth / 8);
-  const wavBuffer = Buffer.alloc(44 + pcmBuffer.length);
-
-  wavBuffer.write("RIFF", 0);
-  wavBuffer.writeUInt32LE(36 + pcmBuffer.length, 4);
-  wavBuffer.write("WAVE", 8);
-  wavBuffer.write("fmt ", 12);
-  wavBuffer.writeUInt32LE(16, 16);
-  wavBuffer.writeUInt16LE(1, 20);
-  wavBuffer.writeUInt16LE(channels, 22);
-  wavBuffer.writeUInt32LE(sampleRate, 24);
-  wavBuffer.writeUInt32LE(byteRate, 28);
-  wavBuffer.writeUInt16LE(blockAlign, 32);
-  wavBuffer.writeUInt16LE(bitDepth, 34);
-  wavBuffer.write("data", 36);
-  wavBuffer.writeUInt32LE(pcmBuffer.length, 40);
-  pcmBuffer.copy(wavBuffer, 44);
-
-  return wavBuffer.toString("base64");
+function mustHaveKey() {
+  if (!GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is not set");
+  }
 }
 
-function extractJson(text) {
-  const raw = String(text || "").trim();
-  const cleaned = raw
-    .replace(/^```json/i, "")
-    .replace(/^```/i, "")
+function cleanJsonText(text) {
+  return String(text || "")
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
     .replace(/```$/i, "")
     .trim();
-
-  const first = cleaned.indexOf("{");
-  const last = cleaned.lastIndexOf("}");
-
-  if (first < 0 || last <= first) return null;
-
-  try {
-    return JSON.parse(cleaned.slice(first, last + 1));
-  } catch {
-    return null;
-  }
 }
 
-function cleanTtsText(text) {
-  return String(text || "")
-    .replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
-    .replace(/[{}\[\]"`]/g, "")
-    .replace(/\b(title|blackboard|segments|heading|text|nextAction)\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+function normalizeLesson(data, grammarPoint) {
+  const title = String(data?.title || grammarPoint || "AI日语老师").trim();
 
-function normalizeData(data, grammarPoint) {
-  const title = data?.title || `「${grammarPoint}」`;
-
-  const blackboard = Array.isArray(data?.blackboard) && data.blackboard.length > 0
+  const blackboard = Array.isArray(data?.blackboard)
     ? data.blackboard
-    : [
-        `🧠 核心感觉：请从「${grammarPoint}」的语感理解`,
-        "🇨🇳 中文意思：先理解大方向",
-        "👉 接续：看前面接什么词",
-        "🎯 使用场景：判断什么时候自然",
-        "🗣️ 例句：结合句子记忆"
-      ];
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
 
-  let segments = Array.isArray(data?.segments) ? data.segments : [];
-
-  segments = segments
-    .map((item) => ({
-      heading: String(item?.heading || "老师"),
-      text: String(item?.text || "").trim()
-    }))
-    .filter((item) => item.text.length > 0);
-
-  if (segments.length === 0) {
-    segments = [
-      {
-        heading: "重新说明",
-        text: `我们重新讲「${grammarPoint}」。先不要死背中文翻译，要先抓住它在日语里的使用感觉。`
-      }
-    ];
-  }
+  const segments = Array.isArray(data?.segments)
+    ? data.segments
+        .map((s) => ({ text: String(s?.text || "").trim() }))
+        .filter((s) => s.text)
+        .slice(0, 20)
+    : [];
 
   return {
     title,
     blackboard,
     segments,
-    nextAction: data?.nextAction || "continue"
   };
 }
 
-function buildPrompt({ grammarPoint, level, history, studentInput, mode }) {
-  return `
-你是一个面向中文母语者的日语老师。
+function pcmToWavBase64(pcmBase64, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
+  const pcm = Buffer.from(pcmBase64, "base64");
+  const byteRate = (sampleRate * channels * bitsPerSample) / 8;
+  const blockAlign = (channels * bitsPerSample) / 8;
 
-当前模式：${mode === "chat" ? "课间聊天" : "语法课堂"}
-当前语法：「${grammarPoint}」
-JLPT等级：${level}
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
 
-绝对规则：
-1. 只返回 JSON，不要 Markdown，不要代码块。
-2. blackboard 是黑板，只放重点。
-3. segments 是老师旁白字幕，只写老师真正要说的话。
-4. segments.text 不要出现 JSON、字段名、括号、引号、emoji。
-5. 讲解必须中文为主。
-6. 日语只用于语法点、例句、学生句子。
-7. 日语必须完整保留假名，例如「話しません」「食べるべきだ」，不能只写汉字。
-8. 如果学生输入是造句或回答练习，必须优先批改，不要继续讲新课。
-9. 批改必须包含：是否自然、哪里不自然、更自然说法、中文解释、类似练习。
-10. 每个 segments.text 控制在 1~2 句话，像电影字幕一样。
-
-返回格式：
-{
-  "title": "「${grammarPoint}」",
-  "blackboard": [
-    "🧠 核心感觉：……",
-    "🇨🇳 中文意思：……",
-    "👉 接续：……",
-    "🎯 使用场景：……",
-    "🗣️ 例句：……"
-  ],
-  "segments": [
-    {
-      "heading": "核心感觉",
-      "text": "老师真正要说的话。"
-    }
-  ],
-  "nextAction": "wait_student"
-}
-
-如果是开始讲课：
-- 讲这个语法本身，不要讲别的语法。
-- 黑板必须围绕「${grammarPoint}」。
-- 旁白也必须围绕「${grammarPoint}」。
-
-如果是学生造句：
-- 不要重新上课。
-- 直接批改学生句子。
-
-学生输入：
-${studentInput || "お願いします"}
-
-对话历史：
-${JSON.stringify(history || [])}
-`;
-}
-
-async function callGeminiJson(prompt) {
-  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is missing");
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.35,
-          maxOutputTokens: 1800,
-          responseMimeType: "application/json"
-        }
-      })
-    }
-  );
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error("Gemini text error:", JSON.stringify(data, null, 2));
-    throw new Error(data?.error?.message || "Gemini text error");
-  }
-
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-}
-
-async function callGeminiTts(text) {
-  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is missing");
-
-  const cleanText = cleanTtsText(text);
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${TTS_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: `
-请朗读下面这段日语老师旁白。
-
-要求：
-- 中文部分用自然中文。
-- 日语例句必须完整用日语读，不要只读汉字。
-- 例如「話しません」必须完整读成日语。
-- 例如「食べるべきだ」必须完整读成日语。
-- 不读 emoji，不读字段名，不读 JSON，不读括号。
-- 像真人老师，有自然停顿和起伏。
-- 语速正常偏快。
-
-正文：
-${cleanText}
-`
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: "Kore"
-              }
-            }
-          }
-        }
-      })
-    }
-  );
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error("Gemini TTS error:", JSON.stringify(data, null, 2));
-    throw new Error(data?.error?.message || "Gemini TTS error");
-  }
-
-  const pcmBase64 = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!pcmBase64) throw new Error("no audio returned");
-
-  return pcmToWavBase64(pcmBase64);
+  return Buffer.concat([header, pcm]).toString("base64");
 }
 
 app.get("/", (req, res) => {
-  res.send("AI Japanese Teacher API is running. VERSION ONE-TTS-2026-05-04");
+  res.json({ ok: true, version: VERSION });
 });
 
 app.get("/version", (req, res) => {
-  res.json({
-    version: "ONE-TTS-2026-05-04",
-    hasGeminiKey: Boolean(GEMINI_API_KEY),
-    keyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0,
-    oneTtsMode: true
-  });
+  res.json({ version: VERSION });
 });
 
-app.post("/api/classroom", async (req, res) => {
+app.post("/api/lesson", async (req, res) => {
   try {
-    const { grammarPoint, level, history, studentInput, mode } = req.body;
+    mustHaveKey();
 
-    const targetGrammar = grammarPoint || "〜べきだ";
+    const {
+      grammarPoint = "",
+      studentInput = "",
+      mode = "lesson",
+      history = [],
+    } = req.body || {};
 
-    const prompt = buildPrompt({
-      grammarPoint: targetGrammar,
-      level: level || "N3",
-      history: history || [],
-      studentInput: studentInput || "お願いします",
-      mode: mode || "lesson"
-    });
+    const safeGrammar = String(grammarPoint || "").trim();
+    const safeInput = String(studentInput || "").trim();
 
-    const raw = await callGeminiJson(prompt);
-    const parsed = extractJson(raw);
+    if (!safeGrammar) {
+      return res.status(400).json({
+        error: "grammarPoint is required",
+      });
+    }
 
-    const data = normalizeData(parsed, targetGrammar);
+    const systemPrompt = `
+你是一个非常自然、聪明、会讲中文的 AI 日语老师。
 
-    const speechText = data.segments
-      .map((s) => s.text)
-      .join("\n");
+这个系统只是壳子，所有教学逻辑由你决定。
+当前语法点是：「${safeGrammar}」。
+
+绝对规则：
+1. 用户输入什么语法，你就只讲这个语法。
+2. 禁止擅自换成别的语法。
+3. 禁止输出 Markdown。
+4. 禁止输出 JSON 以外的内容。
+5. 黑板只写有用重点，不要写“先理解大方向”“看前面接什么词”这种废话。
+6. 右侧 segments 是老师真正说出口的话，必须自然，像真人老师讲课。
+7. 如果学生造句，你必须批改：
+   - 是否自然
+   - 哪里不自然
+   - 更自然表达
+   - 中文解释
+   - 再给一个类似练习
+8. 如果学生提问，你自然回答问题，然后回到当前语法点。
+9. 课堂要轻松、清楚、自然，不要机械。
+
+返回 JSON 格式必须是：
+{
+  "title": "当前语法标题",
+  "blackboard": [
+    "核心感觉：...",
+    "中文意思：...",
+    "接续：...",
+    "使用场景：...",
+    "例句：..."
+  ],
+  "segments": [
+    {"text": "老师旁白第1句"},
+    {"text": "老师旁白第2句"}
+  ]
+}
+`;
+
+    const userPrompt = {
+      currentGrammarPoint: safeGrammar,
+      currentMode: mode,
+      studentInput: safeInput,
+      conversationHistory: Array.isArray(history) ? history.slice(-12) : [],
+    };
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `${systemPrompt}\n\n输入信息：\n${JSON.stringify(
+                    userPrompt,
+                    null,
+                    2
+                  )}`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.8,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                title: { type: "STRING" },
+                blackboard: {
+                  type: "ARRAY",
+                  items: { type: "STRING" },
+                },
+                segments: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: {
+                      text: { type: "STRING" },
+                    },
+                    required: ["text"],
+                  },
+                },
+              },
+              required: ["title", "blackboard", "segments"],
+            },
+          },
+        }),
+      }
+    );
+
+    const raw = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: "Gemini lesson request failed",
+        detail: raw,
+      });
+    }
+
+    const text = raw?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const parsed = JSON.parse(cleanJsonText(text));
+    const lesson = normalizeLesson(parsed, safeGrammar);
 
     res.json({
-      ...data,
-      speechText
+      ok: true,
+      lesson,
+      version: VERSION,
     });
   } catch (error) {
-    console.error("classroom error:", error.message);
     res.status(500).json({
-      error: "AI classroom request failed",
-      detail: error.message
+      error: "lesson failed",
+      message: error.message,
     });
   }
 });
 
 app.post("/api/tts", async (req, res) => {
   try {
-    const text = req.body.text || "";
+    mustHaveKey();
 
-    if (!text.trim()) {
-      return res.status(400).json({ error: "text is required" });
+    const { text = "" } = req.body || {};
+    const safeText = String(text || "").trim();
+
+    if (!safeText) {
+      return res.status(400).json({
+        error: "text is required",
+      });
     }
 
-    const audio = await callGeminiTts(text);
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text:
+                    "请用自然、温柔、清楚的日语老师语气朗读下面内容。语速稍慢，但不要机械。\n\n" +
+                    safeText,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: "Kore",
+                },
+              },
+            },
+          },
+        }),
+      }
+    );
+
+    const raw = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: "Gemini TTS request failed",
+        detail: raw,
+      });
+    }
+
+    const inlineData =
+      raw?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)
+        ?.inlineData || null;
+
+    if (!inlineData?.data) {
+      return res.status(502).json({
+        error: "No audio returned from Gemini TTS",
+      });
+    }
+
+    const wavBase64 = pcmToWavBase64(inlineData.data);
 
     res.json({
-      audio,
-      mimeType: "audio/wav"
+      ok: true,
+      mimeType: "audio/wav",
+      audioBase64: wavBase64,
     });
   } catch (error) {
-    console.error("tts error:", error.message);
     res.status(500).json({
-      error: "tts request failed",
-      detail: error.message
+      error: "tts failed",
+      message: error.message,
     });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`AI Japanese Teacher server running on port ${PORT}`);
-  console.log("ONE TTS VERSION loaded");
+  console.log(`version: ${VERSION}`);
 });

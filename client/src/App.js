@@ -1,389 +1,406 @@
-import { useState, useRef } from "react";
-import "./App.css";
+import React, { useMemo, useRef, useState } from "react";
 
 const API_BASE = "https://ai-japanese-teacher-production.up.railway.app";
 
-function App() {
-  const [mode, setMode] = useState("lesson");
-  const [grammar, setGrammar] = useState("〜べきだ");
-  const [blackboard, setBlackboard] = useState([]);
-  const [title, setTitle] = useState("");
-  const [segments, setSegments] = useState([
-    { heading: "准备", text: "语法点输入后，点击「开始」。" },
-  ]);
-  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
-  const [shownSubtitleCount, setShownSubtitleCount] = useState(1);
-  const [input, setInput] = useState("");
+export default function App() {
+  const [grammarPoint, setGrammarPoint] = useState("〜べきだ");
+  const [studentInput, setStudentInput] = useState("");
+  const [lesson, setLesson] = useState(null);
   const [history, setHistory] = useState([]);
+  const [mode, setMode] = useState("lesson");
   const [loading, setLoading] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [statusText, setStatusText] = useState("");
+  const [ttsStatus, setTtsStatus] = useState("");
+  const [error, setError] = useState("");
 
   const audioRef = useRef(null);
-  const timerRef = useRef(null);
-  const playSessionRef = useRef(0);
 
-  const clearTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  };
+  const teacherText = useMemo(() => {
+    if (!lesson?.segments) return "";
+    return lesson.segments.map((s) => s.text).join("\n");
+  }, [lesson]);
 
-  const hardStopAllAudio = () => {
-    playSessionRef.current += 1;
-    clearTimer();
-
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current = null;
+  async function callLesson(nextMode) {
+    const gp = grammarPoint.trim();
+    if (!gp) {
+      setError("先输入一个语法点，比如：〜べきだ");
+      return;
     }
 
-    setSpeaking(false);
-  };
-
-  const stopVoice = () => {
-    hardStopAllAudio();
-    setPaused(true);
-    setStatusText("讲解已暂停。");
-  };
-
-  const playWholeAudioWithSubtitles = async (list, speechText) => {
-    hardStopAllAudio();
-
-    const sessionId = playSessionRef.current;
-    setSpeaking(true);
-    setPaused(false);
-    setStatusText("老师正在生成语音……");
-
-    try {
-      const res = await fetch(`${API_BASE}/api/tts`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ text: speechText })
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data.audio) {
-        throw new Error(data.detail || "语音额度暂时用完，请稍后再试。");
-      }
-
-      if (sessionId !== playSessionRef.current) return;
-
-      const audio = new Audio(`data:audio/wav;base64,${data.audio}`);
-      audioRef.current = audio;
-      audio.playbackRate = 1.05;
-
-      audio.onloadedmetadata = () => {
-        const total = Math.max(audio.duration || list.length * 4, list.length * 3);
-        const step = Math.max(total / list.length, 2.2);
-
-        let index = 0;
-        setCurrentSegmentIndex(0);
-        setShownSubtitleCount(1);
-        setStatusText("");
-
-        clearTimer();
-        timerRef.current = setInterval(() => {
-          if (sessionId !== playSessionRef.current) {
-            clearTimer();
-            return;
-          }
-
-          index += 1;
-
-          if (index >= list.length) {
-            clearTimer();
-            return;
-          }
-
-          setCurrentSegmentIndex(index);
-          setShownSubtitleCount(index + 1);
-        }, step * 1000);
-      };
-
-      audio.onended = () => {
-        clearTimer();
-        if (sessionId === playSessionRef.current) {
-          setCurrentSegmentIndex(list.length - 1);
-          setShownSubtitleCount(list.length);
-          setSpeaking(false);
-          setStatusText("");
-        }
-      };
-
-      audio.onerror = () => {
-        clearTimer();
-        setSpeaking(false);
-        setStatusText("语音播放失败，请稍后再试。");
-      };
-
-      await audio.play();
-    } catch (error) {
-      console.error(error);
-      setSpeaking(false);
-      setStatusText(error.message || "语音生成失败，请稍后再试。");
-    }
-  };
-
-  const continueVoice = async () => {
-    setStatusText("当前版本暂停后请点击“下一步”继续。");
-  };
-
-  const callTeacher = async (studentText, customHistory = history, customMode = mode) => {
-    if (loading) return;
-
-    hardStopAllAudio();
-    setPaused(false);
     setLoading(true);
-    setStatusText(customMode === "chat" ? "老师正在想怎么跟你聊……" : "老师思考中……");
+    setError("");
+    setTtsStatus("");
+    setMode(nextMode);
 
     try {
-      const res = await fetch(`${API_BASE}/api/classroom`, {
+      const res = await fetch(`${API_BASE}/api/lesson`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          grammarPoint: grammar,
-          level: "N3",
-          history: customHistory,
-          studentInput: studentText || "お願いします",
-          mode: customMode,
+          grammarPoint: gp,
+          studentInput: nextMode === "lesson" ? "" : studentInput.trim(),
+          mode: nextMode,
+          history,
         }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.detail || "AI请求失败");
+        throw new Error(data?.message || data?.error || "AI课堂生成失败");
       }
 
-      const newSegments = Array.isArray(data.segments) ? data.segments : [];
-
-      setTitle(data.title || "");
-      setBlackboard(data.blackboard || []);
-      setSegments(newSegments);
-      setCurrentSegmentIndex(0);
-      setShownSubtitleCount(1);
-
-      const fullTeacherText = newSegments
-        .map((item) => `${item.heading}: ${item.text}`)
-        .join("\n");
+      const nextLesson = data.lesson;
+      setLesson(nextLesson);
 
       const newHistory = [
-        ...customHistory,
-        { role: "student", text: studentText || "お願いします" },
-        { role: "teacher", text: fullTeacherText },
-      ];
+        ...history,
+        {
+          role: "student",
+          text: nextMode === "lesson" ? `请讲解 ${gp}` : studentInput.trim(),
+        },
+        {
+          role: "teacher",
+          text: nextLesson.segments.map((s) => s.text).join("\n"),
+        },
+      ].slice(-12);
 
       setHistory(newHistory);
-      setInput("");
+      setStudentInput("");
+
+      await playAiTtsOnce(nextLesson);
+    } catch (e) {
+      setError(e.message || "出错了");
+    } finally {
       setLoading(false);
-      setStatusText("");
-
-      await playWholeAudioWithSubtitles(newSegments, data.speechText || fullTeacherText);
-    } catch (error) {
-      console.error(error);
-      setSegments([
-        {
-          heading: "错误",
-          text: error.message || "AI请求失败。",
-        },
-      ]);
-      setLoading(false);
-      setStatusText("");
     }
-  };
+  }
 
-  const startClass = () => {
-    const freshHistory = [];
-    setMode("lesson");
-    hardStopAllAudio();
-    setPaused(false);
-    setHistory(freshHistory);
-    setBlackboard([]);
-    setTitle("");
-    setSegments([{ heading: "准备中", text: "老师准备中……" }]);
-    setCurrentSegmentIndex(0);
-    setShownSubtitleCount(1);
-    callTeacher("お願いします", freshHistory, "lesson");
-  };
+  async function playAiTtsOnce(nextLesson) {
+    const text = nextLesson?.segments?.map((s) => s.text).join("\n").trim();
 
-  const sendMessage = () => {
-    if (!input.trim()) return;
-    callTeacher(input.trim(), history, mode);
-  };
+    if (!text) return;
 
-  const nextStep = () => {
-    callTeacher(
-      mode === "chat" ? "请继续自然聊下去。" : "请自然继续下一步。",
-      history,
-      mode
-    );
-  };
+    setTtsStatus("AI语音生成中……");
 
-  const toggleChatMode = () => {
-    const nextMode = mode === "lesson" ? "chat" : "lesson";
-    setMode(nextMode);
-    hardStopAllAudio();
-    setPaused(false);
-    setStatusText("");
-
-    if (nextMode === "chat") {
-      setBlackboard([
-        "☕ 课间聊聊：日本文化 / 旅游 / 思维方式",
-        "💡 可以问：日本人为什么这样说",
-        "🗣️ 也可以聊：日常表达、职场、旅行",
-      ]);
-      setTitle("课间聊聊");
-      setSegments([
-        {
-          heading: "课间模式",
-          text: "好，我们先放松一下。你可以问我日本文化、日本人的思维方式、旅游、职场、生活习惯，或者任何你对日本好奇的事情。",
+    try {
+      const res = await fetch(`${API_BASE}/api/tts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      ]);
-      setCurrentSegmentIndex(0);
-      setShownSubtitleCount(1);
-    } else {
-      setTitle("回到课堂");
-      setSegments([
-        {
-          heading: "回到课堂",
-          text: "好，我们回到刚才的语法课。你可以点击下一步继续，也可以直接问我刚才没听懂的地方。",
-        },
-      ]);
-      setCurrentSegmentIndex(0);
-      setShownSubtitleCount(1);
+        body: JSON.stringify({ text }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.audioBase64) {
+        throw new Error("TTS quota 或接口限制，已只显示字幕。");
+      }
+
+      const audioUrl = `data:${data.mimeType};base64,${data.audioBase64}`;
+
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      await audio.play();
+
+      setTtsStatus("AI语音播放中");
+      audio.onended = () => setTtsStatus("");
+    } catch (e) {
+      setTtsStatus("AI语音暂时不可用，已只显示字幕，不使用浏览器机器朗读。");
     }
-  };
+  }
 
-  const startRecording = () => {
-    setStatusText("语音输入暂时关闭，先用打字回答。");
-  };
-
-  const visibleSubtitles = segments.slice(
-    Math.max(0, shownSubtitleCount - 5),
-    shownSubtitleCount
-  );
+  function resetClass() {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setLesson(null);
+    setHistory([]);
+    setStudentInput("");
+    setError("");
+    setTtsStatus("");
+  }
 
   return (
-    <div className="app">
-      <header className="header">
-        <h1>AI日语老师</h1>
-
-        <div className="grammar-box">
-          <input
-            value={grammar}
-            onChange={(e) => setGrammar(e.target.value)}
-            placeholder="输入语法点"
-          />
-          <button onClick={startClass} disabled={loading}>
-            开始
-          </button>
+    <div style={styles.page}>
+      <div style={styles.header}>
+        <div>
+          <h1 style={styles.h1}>AI日语老师</h1>
+          <p style={styles.sub}>
+            系统只做壳子，教学逻辑全部交给 AI。
+          </p>
         </div>
-      </header>
 
-      <main className="classroom">
-        <section className="blackboard">
-          <div className="board-title">
-            {mode === "chat" ? "☕ 课间黑板" : "今日の黒板"}
-          </div>
+        <button style={styles.smallButton} onClick={resetClass}>
+          重置课堂
+        </button>
+      </div>
 
-          {blackboard.length === 0 ? (
-            <div className="empty">这里显示黑板重点</div>
-          ) : (
-            <div className="board-list">
-              {blackboard.map((item, index) => (
-                <div key={index} className="board-card">
+      <div style={styles.controls}>
+        <input
+          style={styles.input}
+          value={grammarPoint}
+          onChange={(e) => setGrammarPoint(e.target.value)}
+          placeholder="输入语法点，例如：〜べきだ"
+        />
+
+        <button
+          style={styles.primaryButton}
+          onClick={() => callLesson("lesson")}
+          disabled={loading}
+        >
+          {loading && mode === "lesson" ? "生成中..." : "开始讲课"}
+        </button>
+      </div>
+
+      {error && <div style={styles.error}>{error}</div>}
+      {ttsStatus && <div style={styles.tts}>{ttsStatus}</div>}
+
+      <div style={styles.main}>
+        <section style={styles.blackboard}>
+          <h2 style={styles.boardTitle}>
+            {lesson?.title || "黑板"}
+          </h2>
+
+          {lesson?.blackboard?.length ? (
+            <ul style={styles.boardList}>
+              {lesson.blackboard.map((item, index) => (
+                <li key={index} style={styles.boardItem}>
                   {item}
-                </div>
+                </li>
               ))}
+            </ul>
+          ) : (
+            <div style={styles.emptyBoard}>
+              输入语法点后，AI 会把真正有用的重点写在这里。
             </div>
           )}
         </section>
 
-        <section className="teacher">
-          <div className="teacher-top">
-            <div>
-              <div className="teacher-label">
-                {mode === "chat" ? "课间聊天字幕" : "先生の字幕"}
+        <section style={styles.teacherPanel}>
+          <h2 style={styles.teacherTitle}>老师旁白</h2>
+
+          <div style={styles.subtitleBox}>
+            {lesson?.segments?.length ? (
+              lesson.segments.map((seg, index) => (
+                <div key={index} style={styles.bubble}>
+                  {seg.text}
+                </div>
+              ))
+            ) : (
+              <div style={styles.emptySubtitle}>
+                这里会像字幕/聊天消息一样显示老师真正说的话。
               </div>
-              {title && <div className="lesson-title">{title}</div>}
-            </div>
-            {statusText && <div className="status-pill">{statusText}</div>}
+            )}
           </div>
 
-          <div className="subtitle-window">
-            {visibleSubtitles.map((segment, index) => {
-              const realIndex = Math.max(0, shownSubtitleCount - 5) + index;
-              const active = realIndex === currentSegmentIndex;
+          <div style={styles.chatBox}>
+            <textarea
+              style={styles.textarea}
+              value={studentInput}
+              onChange={(e) => setStudentInput(e.target.value)}
+              placeholder="可以提问，也可以造句让老师批改。例如：私は毎日勉強するべきだ。"
+            />
 
-              return (
-                <div
-                  key={`${segment.heading}-${realIndex}`}
-                  className={active ? "subtitle-line active" : "subtitle-line"}
-                >
-                  <div className="subtitle-heading">{segment.heading}</div>
-                  <div className="subtitle-text">{segment.text}</div>
-                </div>
-              );
-            })}
+            <button
+              style={styles.secondaryButton}
+              onClick={() => callLesson("chat")}
+              disabled={loading || !studentInput.trim()}
+            >
+              {loading && mode === "chat" ? "批改中..." : "发送给老师"}
+            </button>
           </div>
         </section>
-      </main>
+      </div>
 
-      <footer className="input-area">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={
-            mode === "chat"
-              ? "问点日本文化、旅游、职场、生活习惯..."
-              : "打字回答或造句"
-          }
-          onKeyDown={(e) => {
-            if (e.key === "Enter") sendMessage();
-          }}
-        />
-
-        <button onClick={sendMessage} disabled={loading}>
-          发送
-        </button>
-
-        <button onClick={startRecording} disabled={loading || speaking}>
-          语音
-        </button>
-
-        {!paused ? (
-          <button
-            onClick={stopVoice}
-            className="stop-button"
-            disabled={!speaking}
-          >
-            停止讲解
-          </button>
-        ) : (
-          <button onClick={continueVoice} disabled={loading}>
-            继续讲解
-          </button>
-        )}
-
-        <button onClick={nextStep} disabled={loading}>
-          下一步
-        </button>
-
-        <button onClick={toggleChatMode} className="chat-button">
-          {mode === "lesson" ? "☕ 课间聊聊" : "📘 回到课堂"}
-        </button>
-      </footer>
+      <div style={styles.footer}>
+        后端：{API_BASE} / Railway 修改后记得点紫色 Deploy
+      </div>
     </div>
   );
 }
 
-export default App;
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "#f5f1e8",
+    padding: "24px",
+    boxSizing: "border-box",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif',
+    color: "#222",
+  },
+  header: {
+    maxWidth: "1180px",
+    margin: "0 auto 18px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "16px",
+  },
+  h1: {
+    margin: 0,
+    fontSize: "32px",
+  },
+  sub: {
+    margin: "6px 0 0",
+    color: "#666",
+  },
+  controls: {
+    maxWidth: "1180px",
+    margin: "0 auto 18px",
+    display: "flex",
+    gap: "12px",
+  },
+  input: {
+    flex: 1,
+    fontSize: "18px",
+    padding: "14px 16px",
+    borderRadius: "14px",
+    border: "1px solid #ddd",
+    outline: "none",
+    background: "#fff",
+  },
+  primaryButton: {
+    padding: "0 24px",
+    border: "none",
+    borderRadius: "14px",
+    background: "#222",
+    color: "#fff",
+    fontSize: "16px",
+    cursor: "pointer",
+  },
+  secondaryButton: {
+    width: "150px",
+    border: "none",
+    borderRadius: "14px",
+    background: "#2f6f4e",
+    color: "#fff",
+    fontSize: "15px",
+    cursor: "pointer",
+  },
+  smallButton: {
+    padding: "10px 14px",
+    borderRadius: "12px",
+    border: "1px solid #ddd",
+    background: "#fff",
+    cursor: "pointer",
+  },
+  main: {
+    maxWidth: "1180px",
+    margin: "0 auto",
+    display: "grid",
+    gridTemplateColumns: "420px 1fr",
+    gap: "18px",
+  },
+  blackboard: {
+    minHeight: "620px",
+    borderRadius: "22px",
+    background: "#173f2f",
+    color: "#f7f3df",
+    padding: "26px",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.12)",
+  },
+  boardTitle: {
+    margin: "0 0 20px",
+    fontSize: "26px",
+    borderBottom: "1px solid rgba(255,255,255,0.35)",
+    paddingBottom: "12px",
+  },
+  boardList: {
+    margin: 0,
+    paddingLeft: "20px",
+  },
+  boardItem: {
+    fontSize: "18px",
+    lineHeight: 1.75,
+    marginBottom: "14px",
+  },
+  emptyBoard: {
+    color: "rgba(255,255,255,0.75)",
+    lineHeight: 1.7,
+  },
+  teacherPanel: {
+    minHeight: "620px",
+    borderRadius: "22px",
+    background: "#fff",
+    padding: "22px",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
+    display: "flex",
+    flexDirection: "column",
+  },
+  teacherTitle: {
+    margin: "0 0 14px",
+    fontSize: "24px",
+  },
+  subtitleBox: {
+    flex: 1,
+    overflowY: "auto",
+    background: "#f7f7f7",
+    borderRadius: "18px",
+    padding: "18px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  bubble: {
+    alignSelf: "flex-start",
+    maxWidth: "88%",
+    background: "#ffffff",
+    border: "1px solid #eee",
+    borderRadius: "18px",
+    padding: "13px 16px",
+    fontSize: "17px",
+    lineHeight: 1.65,
+    boxShadow: "0 4px 14px rgba(0,0,0,0.05)",
+    whiteSpace: "pre-wrap",
+  },
+  emptySubtitle: {
+    color: "#777",
+    lineHeight: 1.7,
+  },
+  chatBox: {
+    marginTop: "16px",
+    display: "flex",
+    gap: "12px",
+  },
+  textarea: {
+    flex: 1,
+    height: "84px",
+    resize: "none",
+    borderRadius: "14px",
+    border: "1px solid #ddd",
+    padding: "12px 14px",
+    fontSize: "15px",
+    outline: "none",
+    fontFamily: "inherit",
+  },
+  error: {
+    maxWidth: "1180px",
+    margin: "0 auto 12px",
+    background: "#ffe8e8",
+    color: "#9b1c1c",
+    padding: "12px 14px",
+    borderRadius: "12px",
+  },
+  tts: {
+    maxWidth: "1180px",
+    margin: "0 auto 12px",
+    background: "#eef3ff",
+    color: "#24427a",
+    padding: "12px 14px",
+    borderRadius: "12px",
+  },
+  footer: {
+    maxWidth: "1180px",
+    margin: "16px auto 0",
+    color: "#777",
+    fontSize: "13px",
+  },
+};
