@@ -13,7 +13,6 @@ app.use(express.json({ limit: "20mb" }));
 
 const PORT = process.env.PORT || 8080;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
 const TEXT_MODEL = "gemini-2.0-flash";
 
 async function callGeminiText(prompt) {
@@ -21,27 +20,27 @@ async function callGeminiText(prompt) {
     throw new Error("GEMINI_API_KEY is missing");
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 1200,
+        responseMimeType: "application/json",
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1200,
-          responseMimeType: "application/json"
-        }
-      })
-    }
-  );
+    }),
+  });
 
   const data = await response.json();
 
@@ -148,14 +147,15 @@ ${studentInput || "お願いします"}
 }
 
 app.get("/", (req, res) => {
-  res.send("AI Japanese Teacher API is running. VERSION 2026-05-03-VERIFY");
+  res.send("AI Japanese Teacher API is running. VERSION NO-SDK-2026-05-03");
 });
 
 app.get("/version", (req, res) => {
   res.json({
-    version: "2026-05-03-VERIFY",
+    version: "NO-SDK-2026-05-03",
     hasGeminiKey: Boolean(GEMINI_API_KEY),
-    keyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0
+    keyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0,
+    sdkRemoved: true,
   });
 });
 
@@ -168,7 +168,7 @@ app.post("/api/classroom", async (req, res) => {
       level: level || "N3",
       history: history || [],
       studentInput: studentInput || "お願いします",
-      mode: mode || "lesson"
+      mode: mode || "lesson",
     });
 
     const rawText = await callGeminiText(prompt);
@@ -182,15 +182,15 @@ app.post("/api/classroom", async (req, res) => {
         title: "老师讲解",
         blackboard: [
           "🧠 核心：先理解语法感觉",
-          "💡 重点：不要死背中文翻译"
+          "💡 重点：不要死背中文翻译",
         ],
         segments: [
           {
             heading: "老师",
-            text: rawText || "老师刚刚没有组织好语言，我们重新来一次。"
-          }
+            text: rawText || "老师刚刚没有组织好语言，我们重新来一次。",
+          },
         ],
-        nextAction: "continue"
+        nextAction: "continue",
       };
     }
 
@@ -198,8 +198,8 @@ app.post("/api/classroom", async (req, res) => {
       data.segments = [
         {
           heading: "老师",
-          text: "我们重新来。这个语法先从核心感觉理解，不要死背中文翻译。"
-        }
+          text: "我们重新来。这个语法先从核心感觉理解，不要死背中文翻译。",
+        },
       ];
     }
 
@@ -208,14 +208,14 @@ app.post("/api/classroom", async (req, res) => {
       text:
         item.text && item.text.trim()
           ? item.text
-          : "老师刚刚没有说完整，我们换一种方式重新讲。"
+          : "老师刚刚没有说完整，我们换一种方式重新讲。",
     }));
 
     if (!Array.isArray(data.blackboard) || data.blackboard.length === 0) {
       data.blackboard = [
         "🧠 核心感觉：先理解语法的使用场景",
         "👉 接续：看前面接什么词",
-        "💡 重点：不要只背中文翻译"
+        "💡 重点：不要只背中文翻译",
       ];
     }
 
@@ -224,24 +224,25 @@ app.post("/api/classroom", async (req, res) => {
     console.error("classroom error:", error.message);
     res.status(500).json({
       error: "AI classroom request failed",
-      detail: error.message
+      detail: error.message,
     });
   }
 });
 
 app.post("/api/tts", async (req, res) => {
   res.status(503).json({
-    error: "AI TTS disabled temporarily, browser fallback will speak instead."
+    error: "AI TTS disabled temporarily. Browser fallback should speak.",
   });
 });
 
 app.post("/api/audio", upload.single("audio"), async (req, res) => {
   res.status(503).json({
-    error: "Audio transcription disabled temporarily."
+    error: "Audio transcription disabled temporarily.",
   });
 });
 
 app.listen(PORT, () => {
   console.log(`AI Japanese Teacher server running on port ${PORT}`);
+  console.log(`NO SDK VERSION loaded`);
   console.log(`Gemini key exists: ${Boolean(GEMINI_API_KEY)}`);
 });
